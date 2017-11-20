@@ -1,0 +1,140 @@
+priority -50
+
+global !p
+import vim
+
+# Set g:ultisnips_php_scalar_types to 1 if you'd like to enable PHP 7's scalar types for return values
+
+def isPHPScalarTypesEnabled():
+  isEnabled = vim.eval("get(g:, 'ultisnips_php_scalar_types', 0)") == "1"
+  return isEnabled or re.match('<\?php\s+declare\(strict_types=[01]\);', '\n'.join(vim.current.window.buffer))
+
+def getPHPNamespace():
+  a = re.match('<\?php(?:\s*declare .+?;\n)*\s*namespace\s+(.+?);', '\n'.join(vim.current.window.buffer))
+  if a:
+    return "\\" + a.group(1).lstrip("\\")
+  return ""
+
+def insertBackendAutoinclude(filename):
+  a = re.match('(\/.*?\/domainfactory)', filename)
+  shortname = re.sub('.*?\/domainfactory\/', '', filename)
+  parts = shortname.split('/')
+  parts.pop()
+  if parts[0] != 'backend':
+    return ''
+  if len(parts) == 1 or parts[1] == 'include':
+    return ''
+  parts = filename.split('/')
+  parts.pop()
+  return "\nrequire_once(__DIR__.'/" + relpath(a.group(1) + '/backend/include/autoloader.php', '/'.join(parts)) + "');\n"
+
+def getPHPNamespaceFromFilename(filename):
+  shortname = re.sub('.*?\/domainfactory\/', '', filename)
+  parts = shortname.split('/')
+  parts.pop()
+  if parts[0] == 'prototype':
+    if len(parts) < 2:
+      return "\nnamespace prototype;\n"
+    parts.pop(0)
+    parts.pop(0)
+    if len(parts):
+      return "\nnamespace prototype\\" + "\\".join(parts) + ";\n"
+    return "\nnamespace prototype;\n"
+  if parts[0] == 'backend':
+    parts.pop(0)
+    if len(parts) < 1 or parts[0] != 'include':
+      return ''
+    parts.pop(0)
+    if len(parts) < 1 or parts[0] == 'libs':
+      return ''
+    parts.pop(0)
+    if len(parts):
+      return "\nnamespace " + "\\".join(parts) + ";\n"
+  return ''
+
+def getPHPType(param):
+  if param[1 : 2] == 'b':
+    return'boolean'
+  if param[1 : 2] == 's':
+    return 'string'
+  if param[1 : 2] == 'i':
+    return 'integer'
+  if param[1 : 2] == 'f':
+    return 'float'
+  if param[1 : 2] == 'h':
+    return 'array'
+  if param[1 : 2] == 'x':
+    return 'mixed'
+  if param[1 : 2] == 'o':
+    return 'object'
+  if param[1 : 2] == 'a':
+    return getPHPType(param[1:]) + '[]'
+  return 'mixed'
+
+endglobal
+
+snippet gm "PHP Class Getter" b
+/**
+ * Getter for $1
+ *
+ * @return ${2:string}
+ */
+public function get${1/\w+\s*/\u$0/}()`!p snip.rv = ': '+t[2] if isPHPScalarTypesEnabled() else ''`
+{
+	return $this->$1;
+}
+endsnippet
+
+snippet imp "Import builerplating"
+if ( $oResult->importResult($1)->isFailure() ) {
+	return $oResult;
+}
+endsnippet
+
+snippet "(var\s+|private\s+|protected\s+|public\s+|)(static\s+|)(\$[a-zA-Z_0-9]+)(;|)" "Class attribute" rb
+`!p import re
+import sys
+visibility = match.group(1) + match.group(2)
+varName = match.group(3)
+snip.rv = '/** @var ' + getPHPType(varName) + ' */ ' + visibility + varName + match.group(4);`
+endsnippet
+
+snippet "(final\s+|)(public\s+|private\s+|protected\s+|)(static\s+|)function\s+(.*)\s*\((.*)\)\s*{" "Function doc" rb
+/**
+ * $1
+ *
+`!p import re
+import sys
+funcSignature = match.group(1) + match.group(2) + match.group(3) + 'function '+match.group(4)+'('+match.group(5)+") {"
+funcParams = match.group(5)
+params = re.split(',\s*(?=([a-zA-Z_\\\\]+\s+)?&?\$)', funcParams)
+for param in params:
+  if param:
+    p = re.search('^([a-zA-Z_\\\\]+\s+)?&?(\$[a-zA-Z0-9_]+)', param)
+    if p:
+      line = ' * @param ';
+      if p.group(1):
+        if (p.group(1).rstrip() == 'array') or (p.group(1).rstrip()[0 : 1] == "\\") or (p.group(1).rstrip() == 'callable'):
+          line += p.group(1).rstrip()
+        else:
+          line += getPHPNamespace() + "\\" + p.group(1).rstrip()
+      else:
+        line += getPHPType(p.group(2))
+      line += ' ' + p.group(2) + "\n"
+      snip.rv += snip.mkline(line)
+if (len(params)) and params[0]:
+  snip.rv += snip.mkline(" *\n")
+snip.rv += snip.mkline(" * @return void\n")
+snip.rv += snip.mkline(" */\n")
+snip.rv += snip.mkline(funcSignature)`
+endsnippet
+
+snippet "<\?php" "Base PHP class" rb
+<?php
+`!p import re
+import sys
+from os.path import relpath
+
+snip.rv = getPHPNamespaceFromFilename(path)
+snip.rv += insertBackendAutoinclude(path)`
+endsnippet
